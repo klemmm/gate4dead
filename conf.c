@@ -16,7 +16,9 @@ static char *conf_keywords[] = {
   "USERNAME",
   "PASSWORD",
   "SERVER",
-  "LPORT"
+  "LPORT",
+  "L4DSERV_HOST",
+  "L4DSERV_PORT"
 };
 
 confkey_t conf_mandatory[] = {
@@ -25,6 +27,7 @@ confkey_t conf_mandatory[] = {
   CONF_USERNAME,
   CONF_PASSWORD,
   CONF_SERVER,
+  CONF_L4DSERV_HOST,
   CONF_MAX
 };
 

@@ -14,7 +14,9 @@ typedef enum {
   CONF_PASSWORD = 4,
   CONF_SERVER = 5,
   CONF_LPORT = 6,
-  CONF_MAX = 7
+  CONF_L4DSERV_HOST = 7,
+  CONF_L4DSERV_PORT = 8,
+  CONF_MAX = 9
 } confkey_t;
 #define CONF_UNKNOWN CONF_MAX
 
