@@ -16,7 +16,9 @@ typedef enum {
   CONF_LPORT = 6,
   CONF_L4DSERV_HOST = 7,
   CONF_L4DSERV_PORT = 8,
-  CONF_MAX = 9
+  CONF_BIND_HOST = 9,
+  CONF_SYMMETRIC = 10,
+  CONF_MAX = 11
 } confkey_t;
 #define CONF_UNKNOWN CONF_MAX
 
