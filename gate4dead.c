@@ -21,6 +21,8 @@
 
 #include "conf.h"
 
+#define GATE4DEAD_VERSION "0.1" 
+
 #define BLUE_BOLD "\x1B[34;1m"
 #define RED_BOLD "\x1B[31;1m"
 #define YELLOW_BOLD "\x1B[33;1m"
@@ -262,7 +264,7 @@ int handle_cmd_ban(struct gateinfo_s *gateinfo, int parc, char **parv) {
   }
   for (iter = ihash_iter(members); iter; iter = ihash_next(members, iter)) {
     member = ihash_val(iter);
-    if ((strcasecmp(member->name, parv[1]) == 0) || (atoi(parv[1]) == member->user_id)) {
+    if ((strcasecmp(member->name, parv[1]) == 0) || (strtoul(parv[1], NULL, 10) == member->user_id)) {
       if (ihash_get(banmap, member->user_id) != NULL) {
         fprintf(stderr, "This user is already banned\n");
         return -1;
@@ -282,6 +284,7 @@ int handle_cmd_ban(struct gateinfo_s *gateinfo, int parc, char **parv) {
     }
   }
   printf("User not found.\n");
+  return -1;
 }
 
 int handle_cmd_unban(struct gateinfo_s *gateinfo, int parc, char **parv) {
@@ -301,6 +304,7 @@ int handle_cmd_unban(struct gateinfo_s *gateinfo, int parc, char **parv) {
     }
   }
   printf("Ban not found.\n");
+  return -1;
 }
 
 int handle_cmd_banlist(struct gateinfo_s *gateinfo, int parc, char **parv) {
@@ -312,6 +316,7 @@ int handle_cmd_banlist(struct gateinfo_s *gateinfo, int parc, char **parv) {
     printf(YELLOW_BOLD "BAN: " WHITE "user " RED_BOLD "%s" GREEN_BOLD " (%u)\n", ban->name, ban->user_id);
   }
   printf(CYAN_BOLD "---================---\n");
+  return 0;
 }
 
 int handle_cmd_save(struct gateinfo_s *gateinfo, int parc, char **parv) {
@@ -338,9 +343,10 @@ int handle_cmd_save(struct gateinfo_s *gateinfo, int parc, char **parv) {
   }
   fclose(f);
   printf("Settings saved.\n");
+  return 0;
 }
 
-banlist_load() {
+void banlist_load() {
   FILE *f;
   ban_t *ban;
   if (conf_getval(CONF_BANLIST_FILE) == NULL) {
@@ -537,6 +543,7 @@ int handle_cmd_whois(struct gateinfo_s *gateinfo, int parc, char **parv) {
   
 }
 int handle_cmd_quit(struct gateinfo_s *gateinfo, int parc, char **parv) {
+  handle_cmd_save(gateinfo, parc, parv);
   quit = 1;
   return 0;
 }
@@ -742,6 +749,7 @@ int main(int argc, char **argv) {
   
   conf_load(argv[1]);
   printf( WHITE_ON_BLACK CLEAR_SCR);
+  printf( WHITE_BOLD "gate4dead " WHITE "version " RED_BOLD "%s" WHITE " starting...\n", GATE4DEAD_VERSION);
   printf("Configuration file loaded from %s\n", argv[1]);
   gateinfo.confname = argv[1];
   
