@@ -73,6 +73,7 @@ struct gateinfo_s {
   char *confname;
   ghl_serv_t *serv;
   int last_ok_keepalive;
+  int on;
 };
 
 typedef int cmdfun_t(struct gateinfo_s *gateinfo, int parc, char **parv);
@@ -81,12 +82,12 @@ typedef struct {
   char *str;
 } cmd_t;
 
-#define MAX_CMDS 11
+#define MAX_CMDS 13
 #define MAX_PARAMS 16
 
 cmd_t cmdtab[];
 
-#define MAX_SESSIONS 256
+#define MAX_SESSIONS 4096
 llist_t sesstab;
 ihash_t sessmap;
 ihash_t banmap;
@@ -248,6 +249,8 @@ int handle_cmd_help(struct gateinfo_s *gateinfo, int parc, char **parv) {
   printf(YELLOW_BOLD "BAN: " WHITE "Ban an user, by account name or user ID\n");
   printf(YELLOW_BOLD "UNBAN: " WHITE "Unban an user, by account name or user ID\n");
   printf(YELLOW_BOLD "BANLIST: " WHITE "Shows the ban list\n");
+  printf(YELLOW_BOLD "OFF: " WHITE "Rejects new sessions\n");
+  printf(YELLOW_BOLD "ON: " WHITE "Accepts new sessions\n");
   printf(YELLOW_BOLD "SAVE: " WHITE "Save settings to file\n");
   printf(YELLOW_BOLD "QUIT: " WHITE "Quit.\n");
   return 0;
@@ -433,6 +436,7 @@ int handle_cmd_status(struct gateinfo_s *gateinfo, int parc, char **parv) {
   printf(CYAN_BOLD "| " WHITE "L4D server IP                 : " YELLOW_BOLD "%s\n", inet_ntoa(saddr));
   printf(CYAN_BOLD "| " WHITE "Using config file             : " BLUE_BOLD "%s\n", gateinfo->confname);
   printf(CYAN_BOLD "| " WHITE "Symmetric address translation : " BLUE_BOLD "%s\n", gateinfo->symmetric ? "enabled" : "disabled" );
+  printf(CYAN_BOLD "| " WHITE "Accepting new sessions        : " BLUE_BOLD "%s\n", gateinfo->on ? "yes" : "no" );
   if (gateinfo->last_ok_keepalive) {
     printf(CYAN_BOLD "| " WHITE "Last successful keep-alive    : " RED_BOLD "%ld\n", time(NULL) - gateinfo->last_ok_keepalive);
   } else {
@@ -542,6 +546,17 @@ int handle_cmd_whois(struct gateinfo_s *gateinfo, int parc, char **parv) {
 
   
 }
+
+int handle_cmd_off(struct gateinfo_s *gateinfo, int parc, char **parv) {
+  printf("Now refusing new sessions\n");
+  gateinfo->on = 0;
+}
+
+int handle_cmd_on(struct gateinfo_s *gateinfo, int parc, char **parv) {
+  printf("Now accepting new sessions\n");
+  gateinfo->on = 1;
+}
+
 int handle_cmd_quit(struct gateinfo_s *gateinfo, int parc, char **parv) {
   handle_cmd_save(gateinfo, parc, parv);
   quit = 1;
@@ -560,6 +575,8 @@ cmd_t cmdtab[MAX_CMDS] = {
  {handle_cmd_ban, "BAN"},
  {handle_cmd_unban, "UNBAN"},
  {handle_cmd_banlist, "BANLIST"},
+ {handle_cmd_on, "ON"},
+ {handle_cmd_off, "OFF"},
  {handle_cmd_save, "SAVE"}
 };
 
@@ -655,12 +672,11 @@ int handle_udp_encap(ghl_serv_t *serveur, int event, void *event_param, void *pr
   if (udp_encap->dport != gateinfo->l4d_port)
     return 0;
   session = session_lookup(udp_encap->member, sport);
-  if ((session == NULL) && (ihash_get(banmap, udp_encap->member->user_id) == NULL)) {
+  if ((session == NULL) && (ihash_get(banmap, udp_encap->member->user_id) == NULL) && (gateinfo->on)) {
     session = session_create(gateinfo,  udp_encap->member, sport);
   }
-  if (session == NULL) {
-    fprintf(stderr, "Failed to create session for user: %s\n", udp_encap->member->name);
-  } else write(session->sock, udp_encap->payload, udp_encap->length);
+  if (session != NULL) 
+    write(session->sock, udp_encap->payload, udp_encap->length);
   return 0;
 }
 
@@ -845,6 +861,8 @@ int main(int argc, char **argv) {
     exit(-1);
   } else printf("Server connection in progress...\n");
   gateinfo.serv = serv;
+  
+  gateinfo.on = 1;
   
   session_init();
   banmap = ihash_init();
