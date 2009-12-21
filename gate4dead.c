@@ -4,6 +4,7 @@
 #include <signal.h>
 #include <netdb.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <assert.h>
 #include <string.h>
 #include <time.h>
@@ -74,6 +75,8 @@ struct gateinfo_s {
   ghl_serv_t *serv;
   int last_ok_keepalive;
   int on;
+  int restrict;
+  char country[3];
 };
 
 typedef int cmdfun_t(struct gateinfo_s *gateinfo, int parc, char **parv);
@@ -82,7 +85,7 @@ typedef struct {
   char *str;
 } cmd_t;
 
-#define MAX_CMDS 13
+#define MAX_CMDS 15
 #define MAX_PARAMS 16
 
 cmd_t cmdtab[];
@@ -119,6 +122,16 @@ int session_fill_fds(fd_set *fds) {
   }
   return max;
 }
+
+int set_nonblock(int sock) {
+  int flags;
+  
+  flags = fcntl(sock, F_GETFL, 0);
+  if (flags == -1)
+    return -1;  
+  return fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+}
+
 
 void session_close(session_t *session) {
   num_sessions --;
@@ -175,6 +188,7 @@ session_t *session_create(struct gateinfo_s *gateinfo, ghl_member_t *member , in
     perror("socket");
     return NULL;
   }
+  set_nonblock(rsock);
   if (gateinfo->bind_ip != INADDR_NONE) {
     local.sin_family = AF_INET;
     if (gateinfo->symmetric) {
@@ -252,8 +266,31 @@ int handle_cmd_help(struct gateinfo_s *gateinfo, int parc, char **parv) {
   printf(YELLOW_BOLD "OFF: " WHITE "Rejects new sessions\n");
   printf(YELLOW_BOLD "ON: " WHITE "Accepts new sessions\n");
   printf(YELLOW_BOLD "SAVE: " WHITE "Save settings to file\n");
+  printf(YELLOW_BOLD "RESTRICT: " WHITE "Accept sessions only from a specific country\n");
+  printf(YELLOW_BOLD "UNRESTRICT: " WHITE "Accept sessions from all countries\n");
   printf(YELLOW_BOLD "QUIT: " WHITE "Quit.\n");
   return 0;
+}
+
+int handle_cmd_restrict(struct gateinfo_s *gateinfo, int parc, char **parv) {
+  if (parc > 2) {
+    printf("usage: RESTRICT [<country>]\n");
+    return -1;
+  }
+  if (parc == 1) 
+  {
+    if (gateinfo->restrict) {
+      printf(CYAN_BOLD "Currently restricted to: " GREEN_BOLD "%s\n", gateinfo->country); 
+    } else printf( CYAN_BOLD "Currently unrestricted\n");
+  }
+  if (parc == 2) {
+    gateinfo->restrict = 1;
+    strncpy(gateinfo->country, parv[1], 2);
+    gateinfo->country[2] = 0; 
+  }
+}
+int handle_cmd_unrestrict(struct gateinfo_s *gateinfo, int parc, char **parv) {
+  gateinfo->restrict = 0;
 }
 
 int handle_cmd_ban(struct gateinfo_s *gateinfo, int parc, char **parv) {
@@ -577,6 +614,8 @@ cmd_t cmdtab[MAX_CMDS] = {
  {handle_cmd_banlist, "BANLIST"},
  {handle_cmd_on, "ON"},
  {handle_cmd_off, "OFF"},
+ {handle_cmd_restrict, "RESTRICT"},
+ {handle_cmd_unrestrict, "UNRESTRICT"},
  {handle_cmd_save, "SAVE"}
 };
 
@@ -672,7 +711,7 @@ int handle_udp_encap(ghl_serv_t *serveur, int event, void *event_param, void *pr
   if (udp_encap->dport != gateinfo->l4d_port)
     return 0;
   session = session_lookup(udp_encap->member, sport);
-  if ((session == NULL) && (ihash_get(banmap, udp_encap->member->user_id) == NULL) && (gateinfo->on)) {
+  if ((session == NULL) && (ihash_get(banmap, udp_encap->member->user_id) == NULL) && ((gateinfo->restrict == 0) || (strncasecmp(udp_encap->member->country, gateinfo->country,2)==0)) && (gateinfo->on)) {
     session = session_create(gateinfo,  udp_encap->member, sport);
   }
   if (session != NULL) 
@@ -863,6 +902,7 @@ int main(int argc, char **argv) {
   gateinfo.serv = serv;
   
   gateinfo.on = 1;
+  gateinfo.restrict = 0;
   
   session_init();
   banmap = ihash_init();
@@ -876,6 +916,7 @@ int main(int argc, char **argv) {
   last_keepalive = time(NULL);
   last_timeout_check = last_keepalive;
   gateinfo.last_ok_keepalive = last_keepalive;
+  set_nonblock(0);
   while (!quit) {
     assert(serv);
     now = time(NULL);
@@ -914,7 +955,7 @@ int main(int argc, char **argv) {
         break;
       if (FD_ISSET(0, &fds)) {
         r = read(0, buf, sizeof(buf));
-        if (r < 0) {
+        if ((r == 0) || ((r == -1) && (errno != EINTR))) {
           quit = 1;
           break;
         } 
