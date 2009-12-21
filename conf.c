@@ -132,5 +132,3 @@ void conf_load(char *filename) {
 const char *conf_getval(confkey_t key) {
   return conf_base[key];
 }
-
- 
