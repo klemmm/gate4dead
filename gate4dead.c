@@ -125,11 +125,13 @@ int session_fill_fds(fd_set *fds) {
 
 int set_nonblock(int sock) {
   int flags;
+  /*
   
   flags = fcntl(sock, F_GETFL, 0);
   if (flags == -1)
     return -1;  
   return fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+  */
 }
 
 
