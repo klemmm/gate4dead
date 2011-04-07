@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -75,7 +76,8 @@ struct gateinfo_s {
   ghl_serv_t *serv;
   int last_ok_keepalive;
   int on;
-  int restrict;
+  int _restrict;
+  int version;
   char country[3];
 };
 
@@ -274,25 +276,25 @@ int handle_cmd_help(struct gateinfo_s *gateinfo, int parc, char **parv) {
   return 0;
 }
 
-int handle_cmd_restrict(struct gateinfo_s *gateinfo, int parc, char **parv) {
+int handle_cmd__restrict(struct gateinfo_s *gateinfo, int parc, char **parv) {
   if (parc > 2) {
     printf("usage: RESTRICT [<country>]\n");
     return -1;
   }
   if (parc == 1) 
   {
-    if (gateinfo->restrict) {
-      printf(CYAN_BOLD "Currently restricted to: " GREEN_BOLD "%s\n", gateinfo->country); 
-    } else printf( CYAN_BOLD "Currently unrestricted\n");
+    if (gateinfo->_restrict) {
+      printf(CYAN_BOLD "Currently _restricted to: " GREEN_BOLD "%s\n", gateinfo->country); 
+    } else printf( CYAN_BOLD "Currently un_restricted\n");
   }
   if (parc == 2) {
-    gateinfo->restrict = 1;
+    gateinfo->_restrict = 1;
     strncpy(gateinfo->country, parv[1], 2);
     gateinfo->country[2] = 0; 
   }
 }
-int handle_cmd_unrestrict(struct gateinfo_s *gateinfo, int parc, char **parv) {
-  gateinfo->restrict = 0;
+int handle_cmd_un_restrict(struct gateinfo_s *gateinfo, int parc, char **parv) {
+  gateinfo->_restrict = 0;
 }
 
 int handle_cmd_ban(struct gateinfo_s *gateinfo, int parc, char **parv) {
@@ -616,8 +618,8 @@ cmd_t cmdtab[MAX_CMDS] = {
  {handle_cmd_banlist, "BANLIST"},
  {handle_cmd_on, "ON"},
  {handle_cmd_off, "OFF"},
- {handle_cmd_restrict, "RESTRICT"},
- {handle_cmd_unrestrict, "UNRESTRICT"},
+ {handle_cmd__restrict, "RESTRICT"},
+ {handle_cmd_un_restrict, "UNRESTRICT"},
  {handle_cmd_save, "SAVE"}
 };
 
@@ -675,12 +677,26 @@ int resolve(const char *addr) {
 
 int handle_me_join(ghl_serv_t *serv, int event, void *event_param, void *privdata) {
   ghl_me_join_t *join = event_param;   
+  /*
+  int fd;
+  char buf[MAX_FRAME];
+  int r;
+  */
   struct gateinfo_s *gateinfo = privdata;
   if (join->result == GHL_EV_RES_SUCCESS) {
     printf("Room %x joined.\n", gateinfo->room_id);
     ghl_togglevpn(serv->room, 1);
     ready = 1;
     gateinfo->my_ip = (serv->room->me->virtual_suffix << 24) | inet_addr(GARENA_NETWORK);
+    /*
+    fd = open("/tmp/reply4", O_RDONLY);
+    r = read(fd, buf, sizeof(buf));
+    close(fd);
+    r = l4d2_translate(gateinfo, buf, r, sizeof(buf));
+    fd = open("/tmp/processed", O_WRONLY | O_CREAT, 0644);
+    write(fd, buf, r);
+    close(fd);
+    */
     printf(WHITE_BOLD "gate4dead> " WHITE);
     fflush(stdout);
   } else {
@@ -705,15 +721,29 @@ int handle_part(ghl_serv_t *serveur, int event, void *event_param, void *privdat
   return 0;
 }
 
+int l4d2_ugly_hack(char *buf, int size) {
+#define NEEDLE "LanSearch"
+  if (size < (0x11 + strlen(NEEDLE) + 1))
+    return 0;
+  /* TODO: need to explain why we do that */
+  if ((memcmp(buf + 0x11, NEEDLE, sizeof(NEEDLE)) == 0) && (buf[0x11 + strlen(NEEDLE)] != 'P'))
+    return 1;
+  return 0;
+}
+
 int handle_udp_encap(ghl_serv_t *serveur, int event, void *event_param, void *privdata) {
   ghl_udp_encap_t *udp_encap = event_param;
   struct gateinfo_s *gateinfo = privdata;
   session_t *session;
   int sport = udp_encap->sport;
-  if (udp_encap->dport != gateinfo->l4d_port)
+  if (udp_encap->dport != L4DSERV_PORT)
     return 0;
+    
+  if (l4d2_ugly_hack(udp_encap->payload, udp_encap->length))
+    return 0;
+    
   session = session_lookup(udp_encap->member, sport);
-  if ((session == NULL) && (ihash_get(banmap, udp_encap->member->user_id) == NULL) && ((gateinfo->restrict == 0) || (strncasecmp(udp_encap->member->country, gateinfo->country,2)==0)) && (gateinfo->on)) {
+  if ((session == NULL) && (ihash_get(banmap, udp_encap->member->user_id) == NULL) && ((gateinfo->_restrict == 0) || (strncasecmp(udp_encap->member->country, gateinfo->country,2)==0)) && (gateinfo->on)) {
     session = session_create(gateinfo,  udp_encap->member, sport);
   }
   if (session != NULL) 
@@ -758,24 +788,49 @@ void register_handlers(ghl_serv_t *serv, struct gateinfo_s *gateinfo) {
 
 
 void l4d_translate(struct gateinfo_s *gateinfo, char *buf, int size) {
-  unsigned int routing_host = gateinfo->l4d_ip;
-  unsigned int routing_host_r = htonl(routing_host);
-  unsigned int myip = gateinfo->my_ip;
-  unsigned int myip_r = htonl(myip);
 
-  if (memcmp(buf + L4D_IP_OFFSET1, &routing_host, 4) == 0) {
-            IFDEBUG(printf("[NET] Translated announcement packet.(1)\n"));
-            memcpy(buf + L4D_IP_OFFSET1, &myip, 4);
-          }
-          if (memcmp(buf + L4D_IP_OFFSET2, &routing_host_r, 4) == 0) {
-            IFDEBUG(printf("[NET] Translated announcement packet(2).\n"));
-            memcpy(buf + L4D_IP_OFFSET2, &myip_r, 4);
-          }
-          if (memcmp(buf + L4D_IP_OFFSET3, &routing_host_r, 4) == 0) {
-            IFDEBUG(printf("[NET] Translated announcement packet(3).\n"));
-            memcpy(buf + L4D_IP_OFFSET3, &myip_r, 4);
-          }
+}
 
+int l4d2_patch_attribute(char *attr, char *val, char *buf, int size) {
+  char *ptr;
+  int len,newlen;
+  ptr = memmem(buf, size, attr, strlen(attr));
+  if (ptr == NULL)
+    return size;
+  ptr += strlen(attr) + 1;
+  if (ptr >= (buf + size))
+    return size;
+  
+  len = strlen(ptr); 
+  newlen = strlen(val);
+  memmove(ptr + newlen, ptr + len, (buf + size) - (ptr + len));
+  size += (newlen - len);
+  memcpy(ptr, val, newlen);
+  return size;
+}
+
+int l4d2_translate(struct gateinfo_s *gateinfo, char *buf, int size, int maxsize) {
+#define NEEDLE2 "GameDetailsServer"
+  char tmp[32];
+  struct in_addr addr;
+  int old_size = size;
+  int *size_field = (void*)(buf + 0x0C);
+  
+  buf[size] = 0;
+  
+  if (size + 32 >= maxsize)
+    return size;
+    
+  addr.s_addr = gateinfo->my_ip;
+  snprintf(tmp, 32, "%s:%u", inet_ntoa(addr), L4DSERV_PORT);
+  
+  if (memcmp(buf + 0x11, NEEDLE2, strlen(NEEDLE2)) != 0)
+    return size;
+  
+  size = l4d2_patch_attribute("adronline", tmp, buf, size);
+  size = l4d2_patch_attribute("adrlocal", tmp, buf, size);
+  *size_field += (size - old_size);
+  return size;
 }
 
 int main(int argc, char **argv) {
@@ -815,7 +870,7 @@ int main(int argc, char **argv) {
     exit(-1);
   }
   
-  signal(SIGINT, SIG_IGN);
+//  signal(SIGINT, SIG_IGN);
   signal(SIGHUP, SIG_IGN);
     
   printf("Resolving server host (%s)\n", conf_getval(CONF_SERVER));
@@ -875,7 +930,15 @@ int main(int argc, char **argv) {
   }
   
   gateinfo.room_id = room_id;
-  
+  gateinfo.version = 1;
+  if (conf_getval(CONF_L4D_VERSION)) {
+    gateinfo.version = atoi(conf_getval(CONF_L4D_VERSION));
+    if ((gateinfo.version != 1) && (gateinfo.version != 2)) {
+      fprintf(stderr, "L4D_VERSION should be 1 or 2\n");
+      exit(-1);
+    }
+  }
+  printf("Gateway to L4D%u server\n", gateinfo.version); 
   if (conf_getval(CONF_LPORT)) {
     lport = atoi(conf_getval(CONF_LPORT));
     if ((lport < 1) || (lport > 65535)) {
@@ -904,7 +967,7 @@ int main(int argc, char **argv) {
   gateinfo.serv = serv;
   
   gateinfo.on = 1;
-  gateinfo.restrict = 0;
+  gateinfo._restrict = 0;
   
   session_init();
   banmap = ihash_init();
@@ -975,8 +1038,8 @@ int main(int argc, char **argv) {
           if (FD_ISSET(session->sock, &fds)) {
             r = read(session->sock, buf, MAX_FRAME);
             if (r > 0) {
-              l4d_translate(&gateinfo, buf, r);
-              ghl_udp_encap(serv, session->member, l4d_port, session->rport, buf, r);
+              r = l4d2_translate(&gateinfo, buf, r, sizeof(buf));
+              ghl_udp_encap(serv, session->member, L4DSERV_PORT, session->rport, buf, r);
             }
           }
         } 

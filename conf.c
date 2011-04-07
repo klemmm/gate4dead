@@ -20,7 +20,8 @@ static char *conf_keywords[] = {
   "L4DSERV_HOST",
   "L4DSERV_PORT",
   "BIND_HOST", 
-  "SYMMETRIC"
+  "SYMMETRIC",
+  "L4D_VERSION"
 };
 
 confkey_t conf_mandatory[] = {
